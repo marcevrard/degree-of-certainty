@@ -17,6 +17,30 @@ import numpy as np
 import pandas as pd
 
 
+def lookup(df, row_labels, col_labels) -> np.ndarray:
+    """
+    Label-based "fancy indexing" function for DataFrame.
+    Given equal-length arrays of row and column labels, return an
+    array of the values corresponding to each (row, col) pair.
+
+    Parameters
+    ----------
+    row_labels : sequence
+        The row labels to use for lookup.
+    col_labels : sequence
+        The column labels to use for lookup.
+
+    Returns
+    -------
+    numpy.ndarray
+        The found values.
+    """
+    row_idx = df.index.get_indexer(row_labels)
+    col_idx = df.columns.get_indexer(col_labels)
+    flat_index = row_idx * len(df.columns) + col_idx
+    return df.values.flat[flat_index]
+
+
 def rename_headers(basename, old_titles):
     return [f"{basename}{el}" for el in range(1, len(old_titles) // 2 + 1)]
 
@@ -94,7 +118,8 @@ def assess_responses(responses_df, ref_df, headers):
 
 def grade(responses_df, matches_df, weights_df, headers):
 
-    values = weights_df.lookup(
+    values = lookup(
+        weights_df,
         responses_df[headers["coefficients"]].values.flatten(),
         matches_df.values.flatten(),
     )
