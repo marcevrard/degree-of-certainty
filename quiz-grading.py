@@ -94,17 +94,11 @@ def assess_responses(responses_df, ref_df, headers):
 
 def grade(responses_df, matches_df, weights_df, headers):
 
-    grades_df = matches_df.rename(
-        columns=mapping(headers["responses"], to_=headers["values"])
+    values = weights_df.lookup(
+        responses_df[headers["coefficients"]].values.flatten(),
+        matches_df.values.flatten(),
     )
-    for is_right in weights_df:
-        values_df = responses_df[headers["coefficients"]].rename(
-            columns=mapping(headers["coefficients"], to_=headers["values"])
-        )
-        values_df = values_df.applymap(lambda x: weights_df.loc[x, is_right])
-        grades_df = grades_df.replace({is_right: np.nan}).combine_first(values_df)
-
-    return grades_df
+    return pd.DataFrame(values.reshape(matches_df.shape), columns=headers["values"])
 
 
 def compute_results(responses_df, grades_df, matches_df, headers):
