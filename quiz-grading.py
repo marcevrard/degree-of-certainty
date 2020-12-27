@@ -19,7 +19,7 @@ import pandas as pd
 
 def lookup(df, row_labels, col_labels) -> np.ndarray:
     """
-    Label-based "fancy indexing" function for DataFrame.
+    Label-based "fancy indexing" function for DataFrame (simplified).
     Given equal-length arrays of row and column labels, return an
     array of the values corresponding to each (row, col) pair.
 
@@ -41,21 +41,6 @@ def lookup(df, row_labels, col_labels) -> np.ndarray:
     return df.values.flat[flat_index]
 
 
-def rename_headers(basename, old_titles):
-    return [f"{basename}{el}" for el in range(1, len(old_titles) // 2 + 1)]
-
-
-def make_headers(df, left, right):
-    headers = {}
-    headers["resp_old_headers"] = df.columns[left:right]
-    headers["questions"] = rename_headers("Q", headers["resp_old_headers"])
-    headers["coefficients"] = [f"C{el[1:]}" for el in headers["questions"]]
-    headers["responses"] = [f"R{el[1:]}" for el in headers["questions"]]
-    headers["values"] = [f"V{el[1:]}" for el in headers["questions"]]
-
-    return headers
-
-
 def mapping(from_, to_):
     return {old: new for old, new in zip(from_, to_)}
 
@@ -64,81 +49,158 @@ def append_to_basename(fp: Path, appendix):
     return fp.with_name(f"{fp.stem}{appendix}").with_suffix(fp.suffix)
 
 
-def text_hist(a, bins=50, width=140):
-    h, b = np.histogram(a, bins)
+class Grader:
+    def __init__(self, args):
+        self.responses_raw_df, self.weights_df, self.reference_df = None, None, None
+        self.results_df, self.grades_df = None, None
+        self.headers = {}
 
-    for i in range(0, bins):
-        print(
-            "{:12.5f}  | {:{width}s} {}".format(
-                b[i], "#" * int(width * h[i] / np.amax(h)), h[i], width=width
+        self.args = args
+        self.fp = Path(args.input)
+
+        self.load_data()
+        self.make_headers()
+        self.cleanup_data()
+
+        self.choose_output_headers()
+
+    def load_data(self):
+        self.responses_raw_df = pd.read_csv(self.fp)
+
+        self.weights_df = (
+            pd.read_csv("weights.csv")
+            .set_index("Coef")
+            .rename(columns={"Right": True, "Wrong": False})
+        )
+        self.reference_df = pd.read_csv(
+            append_to_basename(self.fp, " - Ref")
+        ).set_index("Q_id")
+
+    @staticmethod
+    def rename_headers(basename, old_titles):
+        return [f"{basename}{el}" for el in range(1, len(old_titles) // 2 + 1)]
+
+    @staticmethod
+    def import_range(response_range):
+        try:
+            left, right, *_ = response_range
+        except ValueError:
+            left = response_range[0]
+            right = None
+
+        return left, right
+
+    def make_headers(self):
+        headers = self.headers
+        left, right = self.import_range(self.args.response_range)
+        headers["resp_old_headers"] = self.responses_raw_df.columns[left:right]
+        headers["questions"] = self.rename_headers("Q", headers["resp_old_headers"])
+        headers["coefficients"] = [f"C{el[1:]}" for el in headers["questions"]]
+        headers["responses"] = [f"R{el[1:]}" for el in headers["questions"]]
+        headers["values"] = [f"V{el[1:]}" for el in headers["questions"]]
+
+    def cleanup_data(self):
+        quest_coef = list(
+            itertools.chain.from_iterable(
+                zip(self.headers["questions"], self.headers["coefficients"])
             )
         )
-    print("{:12.5f}  |".format(b[bins]))
+        self.responses_df = self.responses_raw_df.rename(
+            columns=mapping(self.headers["resp_old_headers"], to_=quest_coef)
+        )
+        # Sanity check to verify if response columns were well selected
+        assert (
+            self.responses_df[self.headers["coefficients"]].dtypes == np.dtype("int")
+        ).all()
 
+    def choose_output_headers(self):
+        headers = self.headers
 
-def import_range(response_range):
-    try:
-        left, right, *_ = response_range
-    except ValueError:
-        left = response_range[0]
-        right = None
+        headers["grades"] = list(
+            itertools.chain.from_iterable(zip(headers["responses"], headers["values"]))
+        )
+        if self.args.adjust:
+            headers["totals"] = ["Total", "Total_neg", "Baseline", "Total_adjusted"]
+        else:
+            headers["totals"] = ["Total", "Total_neg"]
 
-    return left, right
+        if self.args.anonym:
+            headers["ids"] = ["Student ID"]
+        else:
+            headers["ids"] = ["First name", "Last name", "Student ID"]
 
+        headers["all"] = headers["ids"] + headers["grades"] + headers["totals"]
 
-def make_out_headers(headers, adjust, anonym):
+    def assess_responses(self):
+        headers = self.headers
+        questions_df = self.responses_df[headers["questions"]]
 
-    headers["grades"] = list(
-        itertools.chain.from_iterable(zip(headers["responses"], headers["values"]))
-    )
+        self.matches_df = questions_df.eq(self.reference_df.Response)
+        self.matches_df.rename(
+            columns=mapping(headers["questions"], to_=headers["responses"]),
+            inplace=True,
+        )
 
-    if adjust:
-        headers["totals"] = ["Total", "Total_neg", "Baseline", "Total_adjusted"]
-    else:
-        headers["totals"] = ["Total", "Total_neg"]
+    def grade(self):
+        headers = self.headers
 
-    if anonym:
-        headers["ids"] = ["Student ID"]
-    else:
-        headers["ids"] = ["First name", "Last name", "Student ID"]
+        values = lookup(
+            self.weights_df,
+            self.responses_df[headers["coefficients"]].values.flatten(),
+            self.matches_df.values.flatten(),
+        )
 
-    headers["all"] = headers["ids"] + headers["grades"] + headers["totals"]
+        self.grades_df = pd.DataFrame(
+            values.reshape(self.matches_df.shape), columns=headers["values"]
+        )
 
-    return headers
+    def compute_results(self):
+        grades_df, matches_df = self.grades_df, self.matches_df
 
+        results_df = self.responses_df.join(matches_df * 1).join(
+            grades_df.astype("int")
+        )
+        results_df["Total"] = grades_df.mean(axis="columns").clip(0, 20).round(1)
+        results_df["Baseline"] = (matches_df * 18).mean(axis="columns").round(1)
+        results_df["Total_neg"] = (
+            results_df[self.headers["values"]]
+            .clip(lower=None, upper=0)
+            .sum(axis="columns")
+            .astype("int")
+        )
+        results_df["Total_adjusted"] = results_df["Total"].clip(results_df["Baseline"])
 
-def assess_responses(responses_df, ref_df, headers):
+        self.results_df = results_df
 
-    matches_df = responses_df[headers["questions"]].eq(ref_df.Response)
-    matches_df.rename(
-        columns=mapping(headers["questions"], to_=headers["responses"]), inplace=True
-    )
-    return matches_df
+    def process(self):
+        self.assess_responses()
+        self.grade()
+        self.compute_results()
 
+    def save(self, to_):
+        if to_ == "csv":
+            self.results_df[self.headers["all"]].to_csv(
+                append_to_basename(self.fp, " - Results"), float_format="%.1f"
+            )
 
-def grade(responses_df, matches_df, weights_df, headers):
+    def print(self):
+        headers = self.headers
 
-    values = lookup(
-        weights_df,
-        responses_df[headers["coefficients"]].values.flatten(),
-        matches_df.values.flatten(),
-    )
-    return pd.DataFrame(values.reshape(matches_df.shape), columns=headers["values"])
+        # To avoid printing ID as float (workaround for .to_markdown() issues)
+        results_df = self.results_df.copy()
+        results_df["Student ID str"] = results_df["Student ID"].astype(str)
 
+        print()
+        print(results_df[headers["all"]].to_markdown(index=False))
+        print()
+        print(results_df[headers["grades"]].describe().round(2).to_markdown())
+        print()
+        print(results_df[headers["totals"]].describe().round(2).to_markdown())
+        print()
 
-def compute_results(responses_df, grades_df, matches_df, headers):
-    results_df = responses_df.join(matches_df * 1).join(grades_df.astype("int"))
-    results_df["Total"] = grades_df.mean(axis="columns").clip(0, 20).round(1)
-    results_df["Baseline"] = (matches_df * 18).mean(axis="columns").round(1)
-    results_df["Total_neg"] = (
-        results_df[headers["values"]]
-        .clip(lower=None, upper=0)
-        .sum(axis="columns")
-        .astype("int")
-    )
-    results_df["Total_adjusted"] = results_df["Total"].clip(results_df["Baseline"])
-
-    return results_df
+    def plot_hist(self):
+        self.results_df.Total_adjusted.hist()
+        plt.show()
 
 
 def argp():
@@ -159,69 +221,22 @@ def argp():
         "--adjust", action="store_true", help="Export adjusted to baseline total."
     )
     parser.add_argument("--anonym", action="store_true", help="Remove student names.")
-    parser.add_argument("--hist", action="store_true", help="Plot histogram.")
+    parser.add_argument("--plot-hist", action="store_true", help="Plot histogram.")
 
     return parser.parse_args()
 
 
 def main(args):
 
-    fp = Path(args.input)
+    grader = Grader(args)
+    grader.process()
+    grader.print()
 
-    left, right = import_range(args.response_range)
+    if args.to is not None:
+        grader.save(args.to)
 
-    responses_raw_df = pd.read_csv(fp)
-
-    weights_df = (
-        pd.read_csv("weights.csv")
-        .set_index("Coef")
-        .rename(columns={"Right": True, "Wrong": False})
-    )
-
-    reference_df = pd.read_csv(append_to_basename(fp, " - Ref")).set_index("Q_id")
-
-    headers = make_headers(responses_raw_df, left, right)
-
-    quest_coeff = list(
-        itertools.chain.from_iterable(
-            zip(headers["questions"], headers["coefficients"])
-        )
-    )
-
-    responses_df = responses_raw_df.rename(
-        columns=mapping(headers["resp_old_headers"], to_=quest_coeff)
-    )
-
-    # Sanity check to verify if response columns were well selected
-    assert (responses_df[headers["coefficients"]].dtypes == np.dtype("int")).all()
-
-    matches_df = assess_responses(responses_df, reference_df, headers)
-
-    grades_df = grade(responses_df, matches_df, weights_df, headers)
-
-    results_df = compute_results(responses_df, grades_df, matches_df, headers)
-
-    output_headers = make_out_headers(headers, args.adjust, args.anonym)
-
-    if args.to == "csv":
-        results_df[output_headers["all"]].to_csv(
-            append_to_basename(fp, " - Results"), float_format="%.1f"
-        )
-
-    # To avoid printing ID as float (workaround for .to_markdown() issues)
-    results_df["Student ID"] = results_df["Student ID"].astype(str)
-
-    print()
-    print(results_df[output_headers["all"]].to_markdown(index=False))
-    print()
-    print(results_df[output_headers["grades"]].describe().round(2).to_markdown())
-    print()
-    print(results_df[output_headers["totals"]].describe().round(2).to_markdown())
-    print()
-
-    if args.hist:
-        results_df.Total_adjusted.hist()
-        plt.show()
+    if args.plot_hist:
+        grader.plot_hist()
 
 
 if __name__ == "__main__":
