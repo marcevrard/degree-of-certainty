@@ -5,21 +5,59 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Python: Current File Alt",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
                 "-i",
-                "../DataCamp/Quiz-3-test/Quiz DataCamp 3.csv",
+                "../Quiz-3-test/Quiz DataCamp 3.csv",
                 "-r",
-                "../DataCamp/Quiz-3-test/Quiz DataCamp 3 - Ref.csv",
+                "../Quiz-3-test/Quiz DataCamp 3 - Ref.csv",
                 "-c",
                 "4",
                 "--anonym",
                 "--to",
                 "csv"
+            ]
+        },
+        {
+            "name": "Python: Current File Sep1",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "-i",
+                "../Quiz-3-test/Quiz DataCamp 3 - separated.csv",
+                "-r",
+                "../Quiz-3-test/Quiz DataCamp 3 - Ref.csv",
+                "-c",
+                "4",
+                "--anonym",
+                "--to",
+                "csv",
+                "--separated-coef"
+            ]
+        },
+        {
+            "name": "Python: Current File Sep2",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "-i",
+                "../Proba/Partiel/Partiel-2021 resultats - Responses.csv",
+                "-r",
+                "../Proba/Partiel/Partiel-2021 resultats - Reference.csv",
+                "-c",
+                "3",
+                "--anonym",
+                "--to",
+                "csv",
+                "--separated-coef"
             ]
         }
     ]
