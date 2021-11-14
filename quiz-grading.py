@@ -4,8 +4,10 @@
 """
 Examples
 ````````
-./quiz-grading.py -i ../DataCamp/Quiz-3-2020-12-17/Quiz\ DataCamp\ 3.csv -r 4
-    --anonym --to csv
+./quiz-grading.py
+    -i ../DataCamp/Quiz-3-2020-12-17/Quiz\ DataCamp\ 3.csv \
+    -r ../DataCamp/Quiz-3-2020-12-17/Quiz\ DataCamp\ 3 - Ref.csv \
+    -q 4 --anonym --to csv
 """
 
 import argparse
@@ -56,7 +58,8 @@ class Grader:
         self.headers = {}
 
         self.args = args
-        self.fp = Path(args.input)
+        self.resp_fp = Path(args.input)
+        self.ref_fp = Path(args.ref)
 
         self.load_data()
         self.make_headers()
@@ -65,34 +68,36 @@ class Grader:
         self.choose_output_headers()
 
     def load_data(self):
-        self.responses_raw_df = pd.read_csv(self.fp)
+        self.responses_raw_df = pd.read_csv(self.resp_fp)
 
         self.weights_df = (
             pd.read_csv("weights.csv")
             .set_index("Coef")
             .rename(columns={"Right": True, "Wrong": False})
         )
-        self.reference_df = pd.read_csv(
-            append_to_basename(self.fp, " - Ref")
-        ).set_index("Q_id")
+        self.reference_df = pd.read_csv(self.ref_fp).set_index("Q_id")
 
     @staticmethod
     def rename_headers(basename, old_titles):
         return [f"{basename}{el}" for el in range(1, len(old_titles) // 2 + 1)]
 
     @staticmethod
-    def import_range(response_range):
+    def import_range(column_limits):
         try:
-            left, right, *_ = response_range
+            left, right, *_ = column_limits
         except ValueError:
-            left = response_range[0]
+            left = column_limits[0]
             right = None
 
         return left, right
 
+    @staticmethod
+    def alternate_list(l1, l2):
+        return list(itertools.chain.from_iterable(zip(l1, l2)))
+
     def make_headers(self):
         headers = self.headers
-        left, right = self.import_range(self.args.response_range)
+        left, right = self.import_range(self.args.response_column_range)
         headers["resp_old_headers"] = self.responses_raw_df.columns[left:right]
         headers["questions"] = self.rename_headers("Q", headers["resp_old_headers"])
         headers["coefficients"] = [f"C{el[1:]}" for el in headers["questions"]]
@@ -100,11 +105,12 @@ class Grader:
         headers["values"] = [f"V{el[1:]}" for el in headers["questions"]]
 
     def cleanup_data(self):
-        quest_coef = list(
-            itertools.chain.from_iterable(
-                zip(self.headers["questions"], self.headers["coefficients"])
+        if self.args.separated_coef is True:
+            quest_coef = self.headers["questions"] + self.headers["coefficients"]
+        else:
+            quest_coef = self.alternate_list(
+                self.headers["questions"], self.headers["coefficients"]
             )
-        )
         self.responses_df = self.responses_raw_df.rename(
             columns=mapping(self.headers["resp_old_headers"], to_=quest_coef)
         )
@@ -116,9 +122,7 @@ class Grader:
     def choose_output_headers(self):
         headers = self.headers
 
-        headers["grades"] = list(
-            itertools.chain.from_iterable(zip(headers["responses"], headers["values"]))
-        )
+        headers["grades"] = self.alternate_list(headers["responses"], headers["values"])
         if self.args.adjust:
             headers["totals"] = ["Total", "Total_neg", "Baseline", "Total_adjusted"]
         else:
@@ -180,7 +184,7 @@ class Grader:
     def save(self, to_):
         if to_ == "csv":
             self.results_df[self.headers["all"]].to_csv(
-                append_to_basename(self.fp, " - Results"), float_format="%.1f"
+                append_to_basename(self.resp_fp, " - Results"), float_format="%.1f"
             )
 
     def print(self):
@@ -208,14 +212,20 @@ def argp():
     parser.add_argument(
         "-i", "--input", required=True, help="Input csv file to process."
     )
+    parser.add_argument("-r", "--ref", required=True, help="Input csv file to process.")
     parser.add_argument("--to", choices=["csv"], help="Export results to csv file.")
     parser.add_argument(
-        "-r",
-        "--response-range",
+        "-c",
+        "--response-column-range",
         nargs="+",
         type=int,
         default=[4],
-        help="Response range.",
+        help="Response column range (first or [first, last]).",
+    )
+    parser.add_argument(
+        "--separated-coef",
+        action="store_true",
+        help="Separated certitude coefficients (default: alternating).",
     )
     parser.add_argument(
         "--adjust", action="store_true", help="Export adjusted to baseline total."
