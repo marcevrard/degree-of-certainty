@@ -4,10 +4,15 @@
 """
 Examples
 ````````
-./quiz-grading.py
-    -i ../DataCamp/Quiz-3-2020-12-17/Quiz\ DataCamp\ 3.csv \
-    -r ../DataCamp/Quiz-3-2020-12-17/Quiz\ DataCamp\ 3 - Ref.csv \
-    -q 4 --anonym --to csv
+    ./quiz-grading.py \
+        -i ../Quiz-3-2020-12-17/Quiz\ DataCamp\ 3.csv \
+        -r ../Quiz-3-2020-12-17/Quiz\ DataCamp\ 3 - Ref.csv \
+        -c 4 --anonym --to csv
+
+    ./quiz-grading.py \
+        -i "../Proba/Partiel/Partiel-2021 resultats.csv" \
+        -r "../Proba/Partiel/Partiel-2021 resultats - Reference.csv" \
+        -c 3 --anonym --to csv --separated-coef
 """
 
 import argparse
@@ -18,6 +23,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+# TODO: change with configuration file to give as input (columns namings)
+LABELS = {"id": "Student ID", "first": "First name", "last": "Last name"}
+# LABELS = {"id": "ID", "first": "First", "last": "Last"}
+
 
 def lookup(df, row_labels, col_labels) -> np.ndarray:
     """
@@ -27,9 +36,9 @@ def lookup(df, row_labels, col_labels) -> np.ndarray:
 
     Parameters
     ----------
-    row_labels : sequence
+    row_labels : Sequence
         The row labels to use for lookup.
-    col_labels : sequence
+    col_labels : Sequence
         The column labels to use for lookup.
 
     Returns
@@ -129,9 +138,9 @@ class Grader:
             headers["totals"] = ["Total", "Total_neg"]
 
         if self.args.anonym:
-            headers["ids"] = ["Student ID"]
+            headers["ids"] = [LABELS["id"]]
         else:
-            headers["ids"] = ["First name", "Last name", "Student ID"]
+            headers["ids"] = [LABELS["last"], LABELS["first"], LABELS["id"]]
 
         headers["all"] = headers["ids"] + headers["grades"] + headers["totals"]
 
@@ -192,7 +201,7 @@ class Grader:
 
         # To avoid printing ID as float (workaround for .to_markdown() issues)
         results_df = self.results_df.copy()
-        results_df["Student ID str"] = results_df["Student ID"].astype(str)
+        results_df[f"{LABELS['id']} str"] = results_df[LABELS["id"]].astype(str)
 
         print()
         print(results_df[headers["all"]].to_markdown(index=False))
